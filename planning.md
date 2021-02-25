@@ -18,6 +18,8 @@ Example 2 self-created:
 
 Will enforce arbitrary limitation of being unable to make change from values greater than $9.99 due to time constraints.
 
+Update (2/23): I was thinking about it on the 21st and decided on the 22nd that it'd be best to limit the dollar cash value due to the project's time limit
+
 ### Retrieve Previous Change Making Operations
 
 Given a text message via Slack in the form `Receipt# xxxxxxx` where the `x` characters form some kind of identifier for a "make change" operation, retrieve the calculation from a database.
