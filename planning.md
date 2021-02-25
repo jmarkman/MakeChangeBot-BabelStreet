@@ -86,3 +86,5 @@ As I write this (2/18/21) I believe the operation will go something like this:
 3. Condense results into a string where the translation would look like this: `0 5-dollars, 1 1-dollar, 2 quarters, 0 dimes, 1 nickle, 2 pennies --> 012012`
 4. Store necessary data in database
 5. When requested, withdraw data from database and parse condensed results string
+
+## 

@@ -10,24 +10,20 @@ class AWSDataAccess(object):
         self.user_name = user
         self.password = pw
 
-    def __enter__(self):
-        try:
-            self.db_conn = pymysql.connect(self.rdb_host, user=self.user_name, passwd=self.password, db=self.db_name)
-            return self.db_conn
-        except pymysql.MySQLError as sqlErr:
-            print(f"Error: could not connect to AWS MySQL RDB. {sqlErr}")
-
-    def add_change_calculation(self, calculation: ChangeCalculation):
+    def add_change_calculation(self, user_id: str, calculation: ChangeCalculation):
         """
         Adds a provided change calculation to the database
+        :param user_id: The user currently requesting the calculation
         :param calculation: The ChangeCalculation object containing the original value and denominations
-        :return: 1 if the row was inserted successfully, 0 on failure
+        :return: The receipt of the calculation to use for accessing it in the future
         """
-        with self.db_conn.cursor() as cursor:
-            sql = "insert into makechange_results (receipt, submittedby, initialvalue, compresseddenominations) values (%s, %s, %s, %s)"
-            affected_rows = cursor.execute(sql, (self.__generate_receipt(), "bar", calculation.original_value, calculation.change_string))
-        self.db_conn.commit()
-        return affected_rows
+        receipt = self.__generate_receipt()
+        with pymysql.connect(host=self.rdb_host, user=self.user_name, passwd=self.password, db=self.db_name) as conn:
+            with conn.cursor() as cursor:
+                sql = "insert into makechange_results (receipt, submittedby, initialvalue, compresseddenominations, dateadded) values (%s, %s, %s, %s, %s)"
+                affected_rows = cursor.execute(sql, (receipt, user_id, calculation.original_value, calculation.change_string, calculation.calculation_time))
+            conn.commit()
+        return receipt
 
     def get_change_from_receipt(self, receipt: str, user_name: str):
         """
@@ -39,16 +35,17 @@ class AWSDataAccess(object):
         """
         # Not a fan that I'm doing an ambiguous (Any) return, but the idea is that
         # this is going to be printed to Slack as a message
-        with self.db_conn.cursor() as cursor:
-            sql = "select * from makechange_results where receipt = %s"
-            cursor.execute(sql, receipt)
-            row = cursor.fetchone()
-            denomination_list = row["compresseddenomination"].split()
-            change_dto = ChangeCalculation(row["initialvalue"], denomination_list)
-            if user_name != row["submittedby"]:
-                return "Users may only access their own change calculations."
-            else:
-                return change_dto
+        with pymysql.connect(host=self.rdb_host, user=self.user_name, passwd=self.password, db=self.db_name) as conn:
+            with conn.cursor() as cursor:
+                sql = "select * from makechange_results where receipt = %s"
+                cursor.execute(sql, receipt)
+                row = cursor.fetchone()
+                denomination_list = list(row[3])
+                change_dto = ChangeCalculation(row[2], denomination_list, row[4])
+                if user_name != row[1]:
+                   return "Users may only access their own change calculations."
+                else:
+                    return change_dto
 
     def __generate_receipt(self):
         """
@@ -60,7 +57,3 @@ class AWSDataAccess(object):
         # Source: https://stackoverflow.com/a/42703170
         return uuid.uuid4().hex[:8].upper()
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.db_conn.close()
-        if exc_val:
-            raise

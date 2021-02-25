@@ -1,4 +1,10 @@
+import base64
+import rds_config
+import re
+import time
+from urllib import parse as urlparse
 from dto import ChangeCalculation
+from dbaccess import AWSDataAccess
 
 MAX_INPUT_LENGTH = 5
 CHANGE_VALUES = [100, 25, 10, 5, 1]
@@ -29,10 +35,27 @@ def make_change(cash_as_pennies: int, cash_input: str):
     for val in CHANGE_VALUES:
         values.append(change // val)
         change %= val
-    return ChangeCalculation(cash_input, ''.join())
+    return ChangeCalculation(cash_input, ''.join(str(v) for v in values), time.strftime('%Y-%m-%d %H:%M:%S'))
 
 
-def calculate_change(cash: str):
+def get_calculation_from_receipt(receipt: str, current_user: str):
+    """
+    Given a receipt, retrieves the results of a previous change calculation
+    :param receipt: The unique identifier for the calculation
+    :param current_user: The user making the request - users may only access their own calculations
+    :return:
+    """
+    data_access = AWSDataAccess(rds_config.host, rds_config.db_name, rds_config.db_username, rds_config.db_password)
+
+    valid_receipt = re.search("[A-Z0-9]{8}", receipt)
+
+    if valid_receipt:
+        return f"Change calculation for {receipt}:\n{str(data_access.get_change_from_receipt(receipt, current_user))}"
+    else:
+        return "The provided receipt was not valid"
+
+
+def calculate_change(cash: str, current_user: str):
     """
     Given a dollar amount in the form '$x.xx', determines the appropriate
     way to break the value into change with the fewest number of denominations
@@ -47,8 +70,30 @@ def calculate_change(cash: str):
 
     change_object = make_change(parsed_cash, cash)
 
-    print(change_object)
+    data_access = AWSDataAccess(rds_config.host, rds_config.db_name, rds_config.db_username,
+                                rds_config.db_password)
 
+    receipt = data_access.add_change_calculation(current_user, change_object)
 
-if __name__ == '__main__':
-    calculate_change('$1.57')
+    return f"{change_object}\nReceipt: {receipt}"
+
+def lambda_handler(event, context):
+    slack_msg_dict = dict(urlparse.parse_qsl(base64.b64decode(str(event['body'])).decode('ascii')))
+    command = slack_msg_dict.get('command', 'err')
+    input = slack_msg_dict.get('text', 'err')
+    current_user = slack_msg_dict.get('user_id', 'err')
+
+    bot_commands = {
+        "/makechangefrom": calculate_change(input, current_user),
+        "/getchangecalculation": get_calculation_from_receipt(input, current_user)
+    }
+
+    try:
+        result = bot_commands[command]
+    except KeyError:
+        result = "Invalid command"
+
+    return {
+        "response_type": "in_channel",
+        "text": result
+    }
